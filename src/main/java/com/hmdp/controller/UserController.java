@@ -67,6 +67,7 @@ public class UserController {
      */
     @GetMapping("/me")
     public Result me(){
+        // 如果能获取到用户信息，说明已经登录
         UserDTO user = UserHolder.getUser();
         return Result.ok(user);
     }

@@ -1,31 +1,56 @@
 package com.hmdp.utils;
 
+import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.StrUtil;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
 
 public class LoginInterceptor implements HandlerInterceptor {
 
+    private StringRedisTemplate stringRedisTemplate;
+
+    //因为这个类是我们手动创建的，不被Spring管理，所以需要用构造函数初始化stringRedisTemplate
+
+
+    public LoginInterceptor(StringRedisTemplate stringRedisTemplate) {
+        this.stringRedisTemplate = stringRedisTemplate;
+    }
+
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        //1.获取session
-        HttpSession session = request.getSession();
-        //2.判断session中是否有用户信息
-        Object user = session.getAttribute("user");
+        //1.获取请求头中的token （前端逻辑是将后端发送的token保存到请求头中，故每次访问，需要查看请求头中是否含有token）
+        String token = request.getHeader("authorization"); //前端用authorization作为token的键
+        if (StrUtil.isBlank(token)) {
+            //不存在，拦截
+            response.setStatus(401); //设置状态码:未授权
+            return false;
+        }
+        //2.判断Redis中是否有用户信息
+        Map<Object, Object> userMap = stringRedisTemplate.opsForHash().entries(LOGIN_USER_KEY+token);
         //3.判断用户是否存在
-        if (user == null) {
+        if (userMap.isEmpty()) {
             //4.不存在，拦截
             response.setStatus(401); //设置状态码:未授权
             return false;
         }
-        //5.存在，保存用户信息到ThreadLocal   (使用工具类)
-        UserHolder.saveUser((UserDTO) user);
+        //5.将查询到的Hash数据再次转为UserDTO对象
+        UserDTO user = BeanUtil.fillBeanWithMap(userMap, new UserDTO(), false);//忽略异常
+        //6.存在，保存用户信息到ThreadLocal   (使用工具类)
+        UserHolder.saveUser(user);
+        //7.刷新Token有效期
+        stringRedisTemplate.expire(LOGIN_USER_KEY+token,30, TimeUnit.MINUTES);
 
-        //6.放行
+        //8.放行
         return true;
     }
 
