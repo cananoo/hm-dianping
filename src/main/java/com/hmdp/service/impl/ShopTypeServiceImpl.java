@@ -43,15 +43,12 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
             }
             return  Result.ok(typeList);
         }
-
         List<ShopType> typeList = query().orderByAsc("sort").list();
-
         if (typeList.isEmpty()) {
             return Result.fail("类型列表不存在!");
         }
-
         for (ShopType type: typeList) {
-            stringRedisTemplate.opsForHash().put(key,type.getId().toString(),JSONUtil.toJsonStr(type));
+            stringRedisTemplate.opsForHash().put(key,type.getId().toString(),JSONUtil.toJsonStr(type)); //由于hash是无序的，所以存进去之后的结果也是无序的，有需要可以用List替换
         }
         return Result.ok(typeList);
     }
