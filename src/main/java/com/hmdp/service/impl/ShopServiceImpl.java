@@ -1,6 +1,7 @@
 package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
@@ -47,22 +48,51 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             return Result.fail("店铺不存在!");
         }
 
+        //4.1缓存重建
+        //4.1.1获取互斥锁
 
-        //4.不存在，根据id查询数据库
-        Shop shop = getById(id);
-        //5.不存在，返回空值(缓存穿透解决)
-        if (shop == null) {
+        Shop shop = null;
+        try {
+            boolean isLock = tryLock(LOCK_SHOP_KEY+id);
+            //4.1.2判断是否成功
+            //4.1.3失败，则休眠并重试
+            if (!isLock) {
+                Thread.sleep(50);
+              return queryById(id);
+            }
+            //4.1.4成功，则根据id查询数据库
+            shop = getById(id);
 
-            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY+id,"",CACHE_NULL_TTL, TimeUnit.MINUTES);
+            //5.不存在，返回空值(缓存穿透解决)
+            if (shop == null) {
+                stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY+id,"",CACHE_NULL_TTL, TimeUnit.MINUTES);
+            }
+            //6.存在，写入redis
+            String shopStr = JSONUtil.toJsonStr(shop);
+            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY+id,shopStr,CACHE_SHOP_TTL, TimeUnit.MINUTES); //添加一个有效时长
+        } catch (InterruptedException e) {
+             throw  new RuntimeException(e);
+        }finally {
+            //4.1.5释放互斥锁
+            unLock(LOCK_SHOP_KEY+id);
         }
-
-
-        //6.存在，写入redis
-        String shopStr = JSONUtil.toJsonStr(shop);
-        stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY+id,shopStr,CACHE_SHOP_TTL, TimeUnit.MINUTES); //添加一个有效时长
         //7.返回
         return Result.ok(shop);
     }
+
+    //利用setns实现互斥
+    private boolean tryLock(String key){
+        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
+        return BooleanUtil.isTrue(flag);     //flag 可能为null，用hotool工具类可以判断null为false;
+    }
+    private void unLock(String key){
+        stringRedisTemplate.delete(key);
+    }
+
+
+
+
+
 
     @Override
     @Transactional // 事务操作
