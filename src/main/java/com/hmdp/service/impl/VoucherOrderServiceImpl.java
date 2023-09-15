@@ -9,9 +9,11 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import lombok.Synchronized;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +37,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     private RedisIdWorker idWorker;
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
     @Override
     public Result seckillVoucher(Long voucherId) {
         //1.查询优惠券
@@ -53,13 +58,24 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
         //用户id
         Long userId = UserHolder.getUser().getId();
-        //由于toString方法生成的对象是不一样的，则锁也不一样，用.intern() 在字符串常量池中找是否有一样的对象进行返回。
-        synchronized (userId.toString().intern()){  //这里只把每个用户的id作为锁，没必要给整个方法加锁。不同用户之间是并行的
+           //创建锁对象
+        SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+        //获取锁
+        boolean isLock = lock.tryLock(100);
+        if (!isLock){
+            return Result.fail("不允许重复下单!");
+        }
+
+        try {
             //这里需要用代理对象(事务是Spring通过代理对象实现的，而不是当前对象this.的调用)，否则事务会失效
             IVoucherOrderService proxy = (IVoucherOrderService)AopContext.currentProxy();
             return proxy.createVoucherOrder(voucherId);
+        } finally {
+            //释放锁
+            lock.unLock();
+        }
              }
-    }
+
 
     @Transactional
     public Result createVoucherOrder(Long voucherId){
