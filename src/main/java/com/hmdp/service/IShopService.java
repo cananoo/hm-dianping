@@ -20,4 +20,6 @@ public interface IShopService extends IService<Shop> {
 
    //更新数据库（并实现和缓存的一致性）
    Result update(Shop shop);
+
+    Result queryShopByType(Integer typeId, Integer current, Double x, Double y);
 }
